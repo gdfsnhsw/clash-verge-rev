@@ -22,10 +22,13 @@ export const WebUIViewer = forwardRef<DialogRef>((props, ref) => {
     close: () => setOpen(false),
   }));
 
-  const webUIList = verge?.web_ui_list || [];
+  const webUIList = verge?.web_ui_list || [
+    "https://metacubex.github.io/metacubexd/#/setup?http=true&hostname=%host&port=%port&secret=%secret",
+    "https://yacd.metacubex.one/?hostname=%host&port=%port&secret=%secret",
+  ];
 
   const handleAdd = useLockFn(async (value: string) => {
-    const newList = [value, ...webUIList];
+    const newList = [...webUIList, value];
     mutateVerge((old) => (old ? { ...old, web_ui_list: newList } : old), false);
     await patchVerge({ web_ui_list: newList });
   });
@@ -95,29 +98,16 @@ export const WebUIViewer = forwardRef<DialogRef>((props, ref) => {
         overflowY: "auto",
         userSelect: "text",
       }}
-      cancelBtn={t("Back")}
+      cancelBtn={t("Close")}
       disableOk
       onClose={() => setOpen(false)}
       onCancel={() => setOpen(false)}
     >
-      {editing && (
-        <WebUIItem
-          value=""
-          onlyEdit
-          onChange={(v) => {
-            setEditing(false);
-            handleAdd(v || "");
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      )}
-
       {!editing && webUIList.length === 0 && (
         <BaseEmpty
-          text="Empty List"
           extra={
             <Typography mt={2} sx={{ fontSize: "12px" }}>
-              Replace host, port, secret with "%host" "%port" "%secret"
+              {t("Replace host, port, secret with %host, %port, %secret")}
             </Typography>
           }
         />
@@ -132,6 +122,17 @@ export const WebUIViewer = forwardRef<DialogRef>((props, ref) => {
           onOpenUrl={handleOpenUrl}
         />
       ))}
+      {editing && (
+        <WebUIItem
+          value=""
+          onlyEdit
+          onChange={(v) => {
+            setEditing(false);
+            handleAdd(v || "");
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      )}
     </BaseDialog>
   );
 });

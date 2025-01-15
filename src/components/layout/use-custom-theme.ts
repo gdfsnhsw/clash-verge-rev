@@ -1,10 +1,11 @@
 import { useEffect, useMemo } from "react";
-import { useRecoilState } from "recoil";
-import { alpha, createTheme, Theme } from "@mui/material";
-import { appWindow } from "@tauri-apps/api/window";
-import { atomThemeMode } from "@/services/states";
+import { alpha, createTheme, Shadows, Theme } from "@mui/material";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useSetThemeMode, useThemeMode } from "@/services/states";
 import { defaultTheme, defaultDarkTheme } from "@/pages/_theme";
 import { useVerge } from "@/hooks/use-verge";
+import { useTheme } from "@mui/material/styles";
+const appWindow = getCurrentWebviewWindow();
 
 /**
  * custom theme
@@ -12,7 +13,8 @@ import { useVerge } from "@/hooks/use-verge";
 export const useCustomTheme = () => {
   const { verge } = useVerge();
   const { theme_mode, theme_setting } = verge ?? {};
-  const [mode, setMode] = useRecoilState(atomThemeMode);
+  const mode = useThemeMode();
+  const setMode = useSetThemeMode();
 
   useEffect(() => {
     const themeMode = ["light", "dark", "system"].includes(theme_mode!)
@@ -59,6 +61,7 @@ export const useCustomTheme = () => {
             paper: dt.background_color,
           },
         },
+        shadows: Array(25).fill("none") as Shadows,
         typography: {
           // todo
           fontFamily: setting.font_family
@@ -87,18 +90,21 @@ export const useCustomTheme = () => {
     }
 
     // css
-    const backgroundColor = mode === "light" ? "#ffffff" : "#0B121C";
+    const backgroundColor = mode === "light" ? "#ECECEC" : "#2e303d";
     const selectColor = mode === "light" ? "#f5f5f5" : "#d5d5d5";
     const scrollColor = mode === "light" ? "#90939980" : "#54545480";
+    const dividerColor =
+      mode === "light" ? "rgba(0, 0, 0, 0.06)" : "rgba(255, 255, 255, 0.06)";
 
     const rootEle = document.documentElement;
+    rootEle.style.setProperty("--divider-color", dividerColor);
     rootEle.style.setProperty("--background-color", backgroundColor);
     rootEle.style.setProperty("--selection-color", selectColor);
     rootEle.style.setProperty("--scroller-color", scrollColor);
     rootEle.style.setProperty("--primary-main", theme.palette.primary.main);
     rootEle.style.setProperty(
       "--background-color-alpha",
-      alpha(theme.palette.primary.main, 0.1)
+      alpha(theme.palette.primary.main, 0.1),
     );
 
     // inject css

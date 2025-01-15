@@ -1,22 +1,28 @@
 use crate::core::handle;
 use anyhow::Result;
+use once_cell::sync::OnceCell;
+use std::fs;
 use std::path::PathBuf;
-use tauri::{
-    api::path::{data_dir, resource_dir},
-    Env,
-};
+use tauri::Manager;
 
 #[cfg(not(feature = "verge-dev"))]
-static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev";
+pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev";
+#[cfg(not(feature = "verge-dev"))]
+pub static BACKUP_DIR: &str = "clash-verge-rev-backup";
+
 #[cfg(feature = "verge-dev")]
-static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev.dev";
+pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev.dev";
+#[cfg(feature = "verge-dev")]
+pub static BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
 
-static CLASH_CONFIG: &str = "config.yaml";
-static VERGE_CONFIG: &str = "verge.yaml";
-static PROFILE_YAML: &str = "profiles.yaml";
+pub static PORTABLE_FLAG: OnceCell<bool> = OnceCell::new();
 
-/// get the verge app home dir
-pub fn app_home_dir() -> Result<PathBuf> {
+pub static CLASH_CONFIG: &str = "config.yaml";
+pub static VERGE_CONFIG: &str = "verge.yaml";
+pub static PROFILE_YAML: &str = "profiles.yaml";
+
+/// init portable flag
+pub fn init_portable_flag() -> Result<()> {
     use tauri::utils::platform::current_exe;
 
     let app_exe = current_exe()?;
@@ -24,29 +30,47 @@ pub fn app_home_dir() -> Result<PathBuf> {
         let dir = PathBuf::from(dir).join(".config/PORTABLE");
 
         if dir.exists() {
-            let app_exe = dunce::canonicalize(app_exe)?;
-            let app_dir = app_exe
-                .parent()
-                .ok_or(anyhow::anyhow!("failed to get the portable app dir"))?;
-            return Ok(PathBuf::from(app_dir).join(".config").join(APP_ID));
+            PORTABLE_FLAG.get_or_init(|| true);
         }
     }
-    Ok(data_dir()
-        .ok_or(anyhow::anyhow!("failed to get app home dir"))?
-        .join(APP_ID))
+    PORTABLE_FLAG.get_or_init(|| false);
+    Ok(())
+}
+
+/// get the verge app home dir
+pub fn app_home_dir() -> Result<PathBuf> {
+    use tauri::utils::platform::current_exe;
+
+    let flag = PORTABLE_FLAG.get().unwrap_or(&false);
+    if *flag {
+        let app_exe = current_exe()?;
+        let app_exe = dunce::canonicalize(app_exe)?;
+        let app_dir = app_exe
+            .parent()
+            .ok_or(anyhow::anyhow!("failed to get the portable app dir"))?;
+        return Ok(PathBuf::from(app_dir).join(".config").join(APP_ID));
+    }
+    let app_handle = handle::Handle::global().app_handle().unwrap();
+
+    match app_handle.path().data_dir() {
+        Ok(dir) => Ok(dir.join(APP_ID)),
+        Err(e) => {
+            log::error!(target:"app", "Failed to get the app home directory: {}", e);
+            Err(anyhow::anyhow!("Failed to get the app homedirectory"))
+        }
+    }
 }
 
 /// get the resources dir
 pub fn app_resources_dir() -> Result<PathBuf> {
-    let handle = handle::Handle::global();
-    let app_handle = handle.app_handle.lock();
-    if let Some(app_handle) = app_handle.as_ref() {
-        let res_dir = resource_dir(app_handle.package_info(), &Env::default())
-            .ok_or(anyhow::anyhow!("failed to get the resource dir"))?
-            .join("resources");
-        return Ok(res_dir);
-    };
-    Err(anyhow::anyhow!("failed to get the resource dir"))
+    let app_handle = handle::Handle::global().app_handle().unwrap();
+    match app_handle.path().resource_dir() {
+        Ok(dir) => Ok(dir.join("resources")),
+        Err(e) => {
+            log::error!(target:"app", "Failed to get the resource directory: {}", e);
+            Err(anyhow::anyhow!("Failed to get the resource directory"))
+        }
+    }
 }
 
 /// profiles dir
@@ -71,21 +95,16 @@ pub fn profiles_path() -> Result<PathBuf> {
     Ok(app_home_dir()?.join(PROFILE_YAML))
 }
 
-pub fn clash_pid_path() -> Result<PathBuf> {
-    Ok(app_home_dir()?.join("clash.pid"))
-}
-
-#[cfg(windows)]
-pub fn service_dir() -> Result<PathBuf> {
-    Ok(app_home_dir()?.join("service"))
+#[cfg(target_os = "macos")]
+pub fn service_path() -> Result<PathBuf> {
+    Ok(app_resources_dir()?.join("clash-verge-service"))
 }
 
 #[cfg(windows)]
 pub fn service_path() -> Result<PathBuf> {
-    Ok(service_dir()?.join("clash-verge-service.exe"))
+    Ok(app_resources_dir()?.join("clash-verge-service.exe"))
 }
 
-#[cfg(windows)]
 pub fn service_log_file() -> Result<PathBuf> {
     use chrono::Local;
 
@@ -106,4 +125,28 @@ pub fn path_to_str(path: &PathBuf) -> Result<&str> {
         .to_str()
         .ok_or(anyhow::anyhow!("failed to get path from {:?}", path))?;
     Ok(path_str)
+}
+
+pub fn get_encryption_key() -> Result<Vec<u8>> {
+    let app_dir = app_home_dir()?;
+    let key_path = app_dir.join(".encryption_key");
+
+    if key_path.exists() {
+        // Read existing key
+        fs::read(&key_path).map_err(|e| anyhow::anyhow!("Failed to read encryption key: {}", e))
+    } else {
+        // Generate and save new key
+        let mut key = vec![0u8; 32];
+        getrandom::getrandom(&mut key)?;
+
+        // Ensure directory exists
+        if let Some(parent) = key_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("Failed to create key directory: {}", e))?;
+        }
+        // Save key
+        fs::write(&key_path, &key)
+            .map_err(|e| anyhow::anyhow!("Failed to save encryption key: {}", e))?;
+        Ok(key)
+    }
 }

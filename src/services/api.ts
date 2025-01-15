@@ -49,12 +49,6 @@ export const getClashConfig = async () => {
   return instance.get("/configs") as Promise<IConfigData>;
 };
 
-/// Update current configs
-export const updateConfigs = async (config: Partial<IConfigData>) => {
-  const instance = await getAxios();
-  return instance.patch("/configs", config);
-};
-
 /// Update geo data
 export const updateGeoData = async () => {
   const instance = await getAxios();
@@ -75,15 +69,19 @@ export const getRules = async () => {
 };
 
 /// Get Proxy delay
-export const getProxyDelay = async (name: string, url?: string) => {
+export const getProxyDelay = async (
+  name: string,
+  url?: string,
+  timeout?: number,
+) => {
   const params = {
-    timeout: 10000,
-    url: url || "http://1.1.1.1",
+    timeout: timeout || 10000,
+    url: url || "http://cp.cloudflare.com/generate_204",
   };
   const instance = await getAxios();
   const result = await instance.get(
     `/proxies/${encodeURIComponent(name)}/delay`,
-    { params }
+    { params },
   );
   return result as any as { delay: number };
 };
@@ -105,49 +103,72 @@ export const getProxiesInner = async () => {
 export const getProxies = async () => {
   const [proxyRecord, providerRecord] = await Promise.all([
     getProxiesInner(),
-    getProviders(),
+    getProxyProviders(),
   ]);
-
   // provider name map
   const providerMap = Object.fromEntries(
     Object.entries(providerRecord).flatMap(([provider, item]) =>
-      item.proxies.map((p) => [p.name, { ...p, provider }])
-    )
+      item.proxies.map((p) => [p.name, { ...p, provider }]),
+    ),
   );
 
   // compatible with proxy-providers
   const generateItem = (name: string) => {
     if (proxyRecord[name]) return proxyRecord[name];
     if (providerMap[name]) return providerMap[name];
-    return { name, type: "unknown", udp: false, history: [] };
+    return {
+      name,
+      type: "unknown",
+      udp: false,
+      xudp: false,
+      tfo: false,
+      mptcp: false,
+      smux: false,
+      history: [],
+    };
   };
 
   const { GLOBAL: global, DIRECT: direct, REJECT: reject } = proxyRecord;
 
-  let groups: IProxyGroupItem[] = [];
+  let groups: IProxyGroupItem[] = Object.values(proxyRecord).reduce<
+    IProxyGroupItem[]
+  >((acc, each) => {
+    if (each.name !== "GLOBAL" && each.all) {
+      acc.push({
+        ...each,
+        all: each.all!.map((item) => generateItem(item)),
+      });
+    }
+
+    return acc;
+  }, []);
 
   if (global?.all) {
-    groups = global.all
-      .filter((name) => proxyRecord[name]?.all)
-      .map((name) => proxyRecord[name])
-      .map((each) => ({
-        ...each,
-        all: each.all!.map((item) => generateItem(item)),
-      }));
-  } else {
-    groups = Object.values(proxyRecord)
-      .filter((each) => each.name !== "GLOBAL" && each.all)
-      .map((each) => ({
-        ...each,
-        all: each.all!.map((item) => generateItem(item)),
-      }))
-      .sort((a, b) => b.name.localeCompare(a.name));
+    let globalGroups: IProxyGroupItem[] = global.all.reduce<IProxyGroupItem[]>(
+      (acc, name) => {
+        if (proxyRecord[name]?.all) {
+          acc.push({
+            ...proxyRecord[name],
+            all: proxyRecord[name].all!.map((item) => generateItem(item)),
+          });
+        }
+        return acc;
+      },
+      [],
+    );
+
+    let globalNames = new Set(globalGroups.map((each) => each.name));
+    groups = groups
+      .filter((group) => {
+        return !globalNames.has(group.name);
+      })
+      .concat(globalGroups);
   }
 
   const proxies = [direct, reject].concat(
     Object.values(proxyRecord).filter(
-      (p) => !p.all?.length && p.name !== "DIRECT" && p.name !== "REJECT"
-    )
+      (p) => !p.all?.length && p.name !== "DIRECT" && p.name !== "REJECT",
+    ),
   );
 
   const _global: IProxyGroupItem = {
@@ -159,17 +180,37 @@ export const getProxies = async () => {
 };
 
 // get proxy providers
-export const getProviders = async () => {
+export const getProxyProviders = async () => {
   const instance = await getAxios();
   const response = await instance.get<any, any>("/providers/proxies");
 
-  const providers = (response.providers || {}) as Record<string, IProviderItem>;
+  const providers = (response.providers || {}) as Record<
+    string,
+    IProxyProviderItem
+  >;
 
   return Object.fromEntries(
     Object.entries(providers).filter(([key, item]) => {
       const type = item.vehicleType.toLowerCase();
       return type === "http" || type === "file";
-    })
+    }),
+  );
+};
+
+export const getRuleProviders = async () => {
+  const instance = await getAxios();
+  const response = await instance.get<any, any>("/providers/rules");
+
+  const providers = (response.providers || {}) as Record<
+    string,
+    IRuleProviderItem
+  >;
+
+  return Object.fromEntries(
+    Object.entries(providers).filter(([key, item]) => {
+      const type = item.vehicleType.toLowerCase();
+      return type === "http" || type === "file";
+    }),
   );
 };
 
@@ -177,13 +218,18 @@ export const getProviders = async () => {
 export const providerHealthCheck = async (name: string) => {
   const instance = await getAxios();
   return instance.get(
-    `/providers/proxies/${encodeURIComponent(name)}/healthcheck`
+    `/providers/proxies/${encodeURIComponent(name)}/healthcheck`,
   );
 };
 
-export const providerUpdate = async (name: string) => {
+export const proxyProviderUpdate = async (name: string) => {
   const instance = await getAxios();
   return instance.put(`/providers/proxies/${encodeURIComponent(name)}`);
+};
+
+export const ruleProviderUpdate = async (name: string) => {
+  const instance = await getAxios();
+  return instance.put(`/providers/rules/${encodeURIComponent(name)}`);
 };
 
 export const getConnections = async () => {
@@ -202,4 +248,43 @@ export const deleteConnection = async (id: string) => {
 export const closeAllConnections = async () => {
   const instance = await getAxios();
   await instance.delete<any, any>(`/connections`);
+};
+
+// Get Group Proxy Delays
+export const getGroupProxyDelays = async (
+  groupName: string,
+  url?: string,
+  timeout?: number,
+) => {
+  const params = {
+    timeout: timeout || 10000,
+    url: url || "http://cp.cloudflare.com/generate_204",
+  };
+  const instance = await getAxios();
+  const result = await instance.get(
+    `/group/${encodeURIComponent(groupName)}/delay`,
+    { params },
+  );
+  return result as any as Record<string, number>;
+};
+
+// Is debug enabled
+export const isDebugEnabled = async () => {
+  try {
+    const instance = await getAxios();
+    await instance.get("/debug/pprof");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// GC
+export const gc = async () => {
+  try {
+    const instance = await getAxios();
+    await instance.put("/debug/gc");
+  } catch (error) {
+    console.error(`Error gcing: ${error}`);
+  }
 };

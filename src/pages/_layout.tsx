@@ -4,16 +4,17 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { SWRConfig, mutate } from "swr";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Route, Routes, useLocation } from "react-router-dom";
-import { CSSTransition, TransitionGroup } from "react-transition-group";
-import { alpha, List, Paper, ThemeProvider } from "@mui/material";
-import { listen } from "@tauri-apps/api/event";
-import { appWindow } from "@tauri-apps/api/window";
+import { useLocation, useRoutes, useNavigate } from "react-router-dom";
+import { List, Paper, ThemeProvider, SvgIcon } from "@mui/material";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { routers } from "./_routers";
 import { getAxios } from "@/services/api";
 import { useVerge } from "@/hooks/use-verge";
 import LogoSvg from "@/assets/image/logo.svg?react";
-import { BaseErrorBoundary, Notice } from "@/components/base";
+import iconLight from "@/assets/image/icon_light.svg?react";
+import iconDark from "@/assets/image/icon_dark.svg?react";
+import { useThemeMode } from "@/services/states";
+import { Notice } from "@/components/base";
 import { LayoutItem } from "@/components/layout/layout-item";
 import { LayoutControl } from "@/components/layout/layout-control";
 import { LayoutTraffic } from "@/components/layout/layout-traffic";
@@ -22,47 +23,59 @@ import { useCustomTheme } from "@/components/layout/use-custom-theme";
 import getSystem from "@/utils/get-system";
 import "dayjs/locale/ru";
 import "dayjs/locale/zh-cn";
+import { getPortableFlag } from "@/services/cmds";
+import React from "react";
+import { TransitionGroup, CSSTransition } from "react-transition-group";
+import { useListen } from "@/hooks/use-listen";
+
+const appWindow = getCurrentWebviewWindow();
+export let portableFlag = false;
 
 dayjs.extend(relativeTime);
 
 const OS = getSystem();
 
 const Layout = () => {
+  const mode = useThemeMode();
+  const isDark = mode === "light" ? false : true;
   const { t } = useTranslation();
-
   const { theme } = useCustomTheme();
 
   const { verge } = useVerge();
-  const { theme_blur, language } = verge || {};
-
+  const { language, start_page } = verge || {};
+  const navigate = useNavigate();
   const location = useLocation();
+  const routersEles = useRoutes(routers);
+  const { addListener, setupCloseListener } = useListen();
+  if (!routersEles) return null;
+
+  setupCloseListener();
 
   useEffect(() => {
-    window.addEventListener("keydown", (e) => {
-      // macOS有cmd+w
-      if (e.key === "Escape" && OS !== "macos") {
-        appWindow.close();
-      }
-    });
-
-    listen("verge://refresh-clash-config", async () => {
+    addListener("verge://refresh-clash-config", async () => {
       // the clash info may be updated
       await getAxios(true);
       mutate("getProxies");
       mutate("getVersion");
       mutate("getClashConfig");
-      mutate("getProviders");
+      mutate("getProxyProviders");
     });
 
     // update the verge config
-    listen("verge://refresh-verge-config", () => mutate("getVergeConfig"));
+    addListener("verge://refresh-verge-config", () => mutate("getVergeConfig"));
 
     // 设置提示监听
-    listen("verge://notice-message", ({ payload }) => {
+    addListener("verge://notice-message", ({ payload }) => {
       const [status, msg] = payload as [string, string];
       switch (status) {
-        case "set_config::ok":
-          Notice.success("Refresh clash config");
+        case "import_sub_url::ok":
+          navigate("/profile", { state: { current: msg } });
+
+          Notice.success(t("Import Subscription Successful"));
+          break;
+        case "import_sub_url::error":
+          navigate("/profile");
+          Notice.error(msg);
           break;
         case "set_config::error":
           Notice.error(msg);
@@ -71,10 +84,12 @@ const Layout = () => {
           break;
       }
     });
-    setTimeout(() => {
-      void appWindow.unminimize();
-      void appWindow.show();
-      void appWindow.setFocus();
+
+    setTimeout(async () => {
+      portableFlag = await getPortableFlag();
+      await appWindow.unminimize();
+      await appWindow.show();
+      await appWindow.setFocus();
     }, 50);
   }, []);
 
@@ -83,7 +98,10 @@ const Layout = () => {
       dayjs.locale(language === "zh" ? "zh-cn" : language);
       i18next.changeLanguage(language);
     }
-  }, [language]);
+    if (start_page) {
+      navigate(start_page);
+    }
+  }, [language, start_page]);
 
   return (
     <SWRConfig value={{ errorRetryCount: 3 }}>
@@ -92,9 +110,6 @@ const Layout = () => {
           square
           elevation={0}
           className={`${OS} layout`}
-          onPointerDown={(e: any) => {
-            if (e.target?.dataset?.windrag) appWindow.startDragging();
-          }}
           onContextMenu={(e) => {
             // only prevent it on Windows
             const validList = ["input", "textarea"];
@@ -111,38 +126,71 @@ const Layout = () => {
           }}
           sx={[
             ({ palette }) => ({
-              bgcolor: alpha(palette.background.paper, theme_blur ? 0.8 : 1),
+              bgcolor: palette.background.paper,
             }),
+            OS === "linux"
+              ? {
+                  borderRadius: "8px",
+                  border: "2px solid var(--divider-color)",
+                  width: "calc(100vw - 4px)",
+                  height: "calc(100vh - 4px)",
+                }
+              : {},
           ]}
         >
-          <div className="layout__left" data-windrag>
-            <div className="the-logo" data-windrag>
-              <LogoSvg />
-
-              {!(OS === "windows" && WIN_PORTABLE) && (
-                <UpdateButton className="the-newbtn" />
-              )}
+          <div className="layout__left">
+            <div className="the-logo" data-tauri-drag-region="true">
+              <div
+                style={{
+                  height: "27px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <SvgIcon
+                  component={isDark ? iconDark : iconLight}
+                  style={{
+                    height: "36px",
+                    width: "36px",
+                    marginTop: "-3px",
+                    marginRight: "5px",
+                    marginLeft: "-3px",
+                  }}
+                  inheritViewBox
+                />
+                <LogoSvg fill={isDark ? "white" : "black"} />
+              </div>
+              {<UpdateButton className="the-newbtn" />}
             </div>
 
             <List className="the-menu">
               {routers.map((router) => (
-                <LayoutItem key={router.label} to={router.link}>
+                <LayoutItem
+                  key={router.label}
+                  to={router.path}
+                  icon={router.icon}
+                >
                   {t(router.label)}
                 </LayoutItem>
               ))}
             </List>
 
-            <div className="the-traffic" data-windrag>
+            <div className="the-traffic">
               <LayoutTraffic />
             </div>
           </div>
 
-          <div className="layout__right" data-windrag>
-            {OS === "windows" && (
+          <div className="layout__right">
+            {
               <div className="the-bar">
-                <LayoutControl />
+                <div
+                  className="the-dragbar"
+                  data-tauri-drag-region="true"
+                  style={{ width: "100%" }}
+                ></div>
+                {OS !== "macos" && <LayoutControl />}
               </div>
-            )}
+            }
 
             <TransitionGroup className="the-content">
               <CSSTransition
@@ -150,19 +198,7 @@ const Layout = () => {
                 timeout={300}
                 classNames="page"
               >
-                <Routes>
-                  {routers.map(({ label, link, ele: Ele }) => (
-                    <Route
-                      key={label}
-                      path={link}
-                      element={
-                        <BaseErrorBoundary key={label}>
-                          <Ele />
-                        </BaseErrorBoundary>
-                      }
-                    />
-                  ))}
-                </Routes>
+                {React.cloneElement(routersEles, { key: location.pathname })}
               </CSSTransition>
             </TransitionGroup>
           </div>

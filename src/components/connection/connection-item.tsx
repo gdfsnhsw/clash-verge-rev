@@ -19,6 +19,7 @@ const Tag = styled("span")(({ theme }) => ({
   border: "1px solid",
   borderRadius: 4,
   borderColor: alpha(theme.palette.text.secondary, 0.35),
+  marginTop: "4px",
   marginRight: "4px",
 }));
 
@@ -38,6 +39,7 @@ export const ConnectionItem = (props: Props) => {
   return (
     <ListItem
       dense
+      sx={{ borderBottom: "1px solid var(--divider-color)" }}
       secondaryAction={
         <IconButton edge="end" color="inherit" onClick={onDelete}>
           <CloseRounded />
@@ -58,7 +60,9 @@ export const ConnectionItem = (props: Props) => {
 
             {!!metadata.process && <Tag>{metadata.process}</Tag>}
 
-            {chains?.length > 0 && <Tag>{chains[value.chains.length - 1]}</Tag>}
+            {chains?.length > 0 && (
+              <Tag>{[...chains].reverse().join(" / ")}</Tag>
+            )}
 
             <Tag>{dayjs(start).fromNow()}</Tag>
 

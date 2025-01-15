@@ -4,13 +4,21 @@ use crate::{
     feat,
     utils::{dirs, help},
 };
-use crate::{ret_err, wrap_err};
+use crate::{log_err, ret_err, wrap_err};
 use anyhow::{Context, Result};
+use network_interface::NetworkInterface;
 use serde_yaml::Mapping;
-use std::collections::{HashMap, VecDeque};
-use sysproxy::Sysproxy;
-
+use std::collections::HashMap;
+use sysproxy::{Autoproxy, Sysproxy};
 type CmdResult<T = ()> = Result<T, String>;
+use reqwest_dav::list_cmd::ListFile;
+use tauri::Manager;
+
+#[tauri::command]
+pub fn copy_clash_env() -> CmdResult {
+    feat::copy_clash_env();
+    Ok(())
+}
 
 #[tauri::command]
 pub fn get_profiles() -> CmdResult<IProfiles> {
@@ -20,6 +28,7 @@ pub fn get_profiles() -> CmdResult<IProfiles> {
 #[tauri::command]
 pub async fn enhance_profiles() -> CmdResult {
     wrap_err!(CoreManager::global().update_config().await)?;
+    log_err!(tray::Tray::global().update_tooltip());
     handle::Handle::refresh_clash();
     Ok(())
 }
@@ -65,6 +74,7 @@ pub async fn patch_profiles_config(profiles: IProfiles) -> CmdResult {
     match CoreManager::global().update_config().await {
         Ok(_) => {
             handle::Handle::refresh_clash();
+            let _ = tray::Tray::global().update_tooltip();
             Config::profiles().apply();
             wrap_err!(Config::profiles().data().save_file())?;
             Ok(())
@@ -160,8 +170,10 @@ pub async fn patch_clash_config(payload: Mapping) -> CmdResult {
 }
 
 #[tauri::command]
-pub fn get_verge_config() -> CmdResult<IVerge> {
-    Ok(Config::verge().data().clone())
+pub fn get_verge_config() -> CmdResult<IVergeResponse> {
+    let verge = Config::verge();
+    let verge_data = verge.data().clone();
+    Ok(IVergeResponse::from(verge_data))
 }
 
 #[tauri::command]
@@ -176,24 +188,14 @@ pub async fn change_clash_core(clash_core: Option<String>) -> CmdResult {
 
 /// restart the sidecar
 #[tauri::command]
-pub async fn restart_sidecar() -> CmdResult {
-    wrap_err!(CoreManager::global().run_core().await)
-}
-
-#[tauri::command]
-pub fn grant_permission(_core: String) -> CmdResult {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    return wrap_err!(manager::grant_permission(_core));
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    return Err("Unsupported target".into());
+pub async fn restart_core() -> CmdResult {
+    wrap_err!(CoreManager::global().restart_core().await)
 }
 
 /// get the system proxy
 #[tauri::command]
 pub fn get_sys_proxy() -> CmdResult<Mapping> {
     let current = wrap_err!(Sysproxy::get_system_proxy())?;
-
     let mut map = Mapping::new();
     map.insert("enable".into(), current.enable.into());
     map.insert(
@@ -205,9 +207,16 @@ pub fn get_sys_proxy() -> CmdResult<Mapping> {
     Ok(map)
 }
 
+/// get the system proxy
 #[tauri::command]
-pub fn get_clash_logs() -> CmdResult<VecDeque<String>> {
-    Ok(logger::Logger::global().get_log())
+pub fn get_auto_proxy() -> CmdResult<Mapping> {
+    let current = wrap_err!(Autoproxy::get_auto_proxy())?;
+
+    let mut map = Mapping::new();
+    map.insert("enable".into(), current.enable.into());
+    map.insert("url".into(), current.url.into());
+
+    Ok(map)
 }
 
 #[tauri::command]
@@ -219,7 +228,7 @@ pub fn open_app_dir() -> CmdResult<()> {
 #[tauri::command]
 pub fn open_core_dir() -> CmdResult<()> {
     let core_dir = wrap_err!(tauri::utils::platform::current_exe())?;
-    let core_dir = core_dir.parent().ok_or(format!("failed to get core dir"))?;
+    let core_dir = core_dir.parent().ok_or("failed to get core dir")?;
     wrap_err!(open::that(core_dir))
 }
 
@@ -249,50 +258,164 @@ pub mod uwp {
 pub async fn clash_api_get_proxy_delay(
     name: String,
     url: Option<String>,
+    timeout: i32,
 ) -> CmdResult<clash_api::DelayRes> {
-    match clash_api::get_proxy_delay(name, url).await {
+    match clash_api::get_proxy_delay(name, url, timeout).await {
         Ok(res) => Ok(res),
-        Err(err) => Err(format!("{}", err.to_string())),
+        Err(err) => Err(err.to_string()),
     }
 }
 
-#[cfg(windows)]
-pub mod service {
-    use super::*;
-    use crate::core::win_service;
+#[tauri::command]
+pub fn get_portable_flag() -> CmdResult<bool> {
+    Ok(*dirs::PORTABLE_FLAG.get().unwrap_or(&false))
+}
 
-    #[tauri::command]
-    pub async fn check_service() -> CmdResult<win_service::JsonResponse> {
-        wrap_err!(win_service::check_service().await)
+#[tauri::command]
+pub async fn test_delay(url: String) -> CmdResult<u32> {
+    Ok(feat::test_delay(url).await.unwrap_or(10000u32))
+}
+
+#[tauri::command]
+pub fn get_app_dir() -> CmdResult<String> {
+    let app_home_dir = wrap_err!(dirs::app_home_dir())?
+        .to_string_lossy()
+        .to_string();
+    Ok(app_home_dir)
+}
+
+#[tauri::command]
+pub async fn download_icon_cache(url: String, name: String) -> CmdResult<String> {
+    let icon_cache_dir = wrap_err!(dirs::app_home_dir())?.join("icons").join("cache");
+    let icon_path = icon_cache_dir.join(name);
+    if !icon_cache_dir.exists() {
+        let _ = std::fs::create_dir_all(&icon_cache_dir);
     }
+    if !icon_path.exists() {
+        let response = wrap_err!(reqwest::get(url).await)?;
 
-    #[tauri::command]
-    pub async fn install_service() -> CmdResult {
-        wrap_err!(win_service::install_service().await)
+        let mut file = wrap_err!(std::fs::File::create(&icon_path))?;
+
+        let content = wrap_err!(response.bytes().await)?;
+        wrap_err!(std::io::copy(&mut content.as_ref(), &mut file))?;
     }
+    Ok(icon_path.to_string_lossy().to_string())
+}
+#[tauri::command]
+pub fn copy_icon_file(path: String, name: String) -> CmdResult<String> {
+    let file_path = std::path::Path::new(&path);
+    let icon_dir = wrap_err!(dirs::app_home_dir())?.join("icons");
+    if !icon_dir.exists() {
+        let _ = std::fs::create_dir_all(&icon_dir);
+    }
+    let ext = match file_path.extension() {
+        Some(e) => e.to_string_lossy().to_string(),
+        None => "ico".to_string(),
+    };
 
-    #[tauri::command]
-    pub async fn uninstall_service() -> CmdResult {
-        wrap_err!(win_service::uninstall_service().await)
+    let png_dest_path = icon_dir.join(format!("{name}.png"));
+    let ico_dest_path = icon_dir.join(format!("{name}.ico"));
+    let dest_path = icon_dir.join(format!("{name}.{ext}"));
+    if file_path.exists() {
+        std::fs::remove_file(png_dest_path).unwrap_or_default();
+        std::fs::remove_file(ico_dest_path).unwrap_or_default();
+        match std::fs::copy(file_path, &dest_path) {
+            Ok(_) => Ok(dest_path.to_string_lossy().to_string()),
+            Err(err) => Err(err.to_string()),
+        }
+    } else {
+        Err("file not found".to_string())
     }
 }
 
-#[cfg(not(windows))]
-pub mod service {
-    use super::*;
+#[tauri::command]
+pub fn get_network_interfaces() -> Vec<String> {
+    use sysinfo::Networks;
+    let mut result = Vec::new();
+    let networks = Networks::new_with_refreshed_list();
+    for (interface_name, _) in &networks {
+        result.push(interface_name.clone());
+    }
+    result
+}
 
-    #[tauri::command]
-    pub async fn check_service() -> CmdResult {
-        Ok(())
+#[tauri::command]
+pub fn get_network_interfaces_info() -> CmdResult<Vec<NetworkInterface>> {
+    use network_interface::NetworkInterface;
+    use network_interface::NetworkInterfaceConfig;
+
+    let names = get_network_interfaces();
+    let interfaces = wrap_err!(NetworkInterface::show())?;
+
+    let mut result = Vec::new();
+
+    for interface in interfaces {
+        if names.contains(&interface.name) {
+            result.push(interface);
+        }
     }
-    #[tauri::command]
-    pub async fn install_service() -> CmdResult {
-        Ok(())
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn open_devtools(app_handle: tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        if !window.is_devtools_open() {
+            window.open_devtools();
+        } else {
+            window.close_devtools();
+        }
     }
-    #[tauri::command]
-    pub async fn uninstall_service() -> CmdResult {
-        Ok(())
-    }
+}
+
+#[tauri::command]
+pub fn exit_app() {
+    feat::quit(Some(0));
+}
+
+#[tauri::command]
+pub async fn save_webdav_config(url: String, username: String, password: String) -> CmdResult<()> {
+    let patch = IVerge {
+        webdav_url: Some(url),
+        webdav_username: Some(username),
+        webdav_password: Some(password),
+        ..IVerge::default()
+    };
+    Config::verge().draft().patch_config(patch.clone());
+    Config::verge().apply();
+    Config::verge()
+        .data()
+        .save_file()
+        .map_err(|err| err.to_string())?;
+    backup::WebDavClient::global().reset();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn create_webdav_backup() -> CmdResult<()> {
+    wrap_err!(feat::create_backup_and_upload_webdav().await)
+}
+
+#[tauri::command]
+pub async fn list_webdav_backup() -> CmdResult<Vec<ListFile>> {
+    wrap_err!(feat::list_wevdav_backup().await)
+}
+
+#[tauri::command]
+pub async fn delete_webdav_backup(filename: String) -> CmdResult<()> {
+    wrap_err!(feat::delete_webdav_backup(filename).await)
+}
+
+#[tauri::command]
+pub async fn restore_webdav_backup(filename: String) -> CmdResult<()> {
+    wrap_err!(feat::restore_webdav_backup(filename).await)
+}
+
+#[tauri::command]
+pub async fn restart_app() -> CmdResult<()> {
+    feat::restart_app();
+    Ok(())
 }
 
 #[cfg(not(windows))]

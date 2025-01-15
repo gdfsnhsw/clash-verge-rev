@@ -1,46 +1,30 @@
 import useSWR from "swr";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconButton, Switch } from "@mui/material";
-import { ArrowForward, PrivacyTipRounded, Settings } from "@mui/icons-material";
-import { checkService } from "@/services/cmds";
+import { SettingsRounded } from "@mui/icons-material";
 import { useVerge } from "@/hooks/use-verge";
-import { DialogRef } from "@/components/base";
+import { DialogRef, Notice, Switch } from "@/components/base";
 import { SettingList, SettingItem } from "./mods/setting-comp";
 import { GuardState } from "./mods/guard-state";
-import { ServiceViewer } from "./mods/service-viewer";
 import { SysproxyViewer } from "./mods/sysproxy-viewer";
-import getSystem from "@/utils/get-system";
+import { TunViewer } from "./mods/tun-viewer";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 
 interface Props {
   onError?: (err: Error) => void;
 }
-
-const isWIN = getSystem() === "windows";
 
 const SettingSystem = ({ onError }: Props) => {
   const { t } = useTranslation();
 
   const { verge, mutateVerge, patchVerge } = useVerge();
 
-  // service mode
-  const { data: serviceStatus } = useSWR(
-    isWIN ? "checkService" : null,
-    checkService,
-    {
-      revalidateIfStale: false,
-      shouldRetryOnError: false,
-      focusThrottleInterval: 36e5, // 1 hour
-    }
-  );
-
-  const serviceRef = useRef<DialogRef>(null);
   const sysproxyRef = useRef<DialogRef>(null);
+  const tunRef = useRef<DialogRef>(null);
 
   const {
     enable_tun_mode,
     enable_auto_launch,
-    enable_service_mode,
     enable_silent_start,
     enable_system_proxy,
   } = verge ?? {};
@@ -53,70 +37,43 @@ const SettingSystem = ({ onError }: Props) => {
   return (
     <SettingList title={t("System Setting")}>
       <SysproxyViewer ref={sysproxyRef} />
-      {isWIN && (
-        <ServiceViewer ref={serviceRef} enable={!!enable_service_mode} />
-      )}
+      <TunViewer ref={tunRef} />
 
-      <SettingItem label={t("Tun Mode")}>
+      <SettingItem
+        label={t("Tun Mode")}
+        extra={
+          <TooltipIcon
+            title={t("Tun Mode Info")}
+            icon={SettingsRounded}
+            onClick={() => tunRef.current?.open()}
+          />
+        }
+      >
         <GuardState
           value={enable_tun_mode ?? false}
           valueProps="checked"
           onCatch={onError}
           onFormat={onSwitchFormat}
-          onChange={(e) => onChangeData({ enable_tun_mode: e })}
-          onGuard={(e) => patchVerge({ enable_tun_mode: e })}
+          onChange={(e) => {
+            onChangeData({ enable_tun_mode: e });
+          }}
+          onGuard={(e) => {
+            return patchVerge({ enable_tun_mode: e });
+          }}
         >
           <Switch edge="end" />
         </GuardState>
       </SettingItem>
-
-      {isWIN && (
-        <SettingItem
-          label={t("Service Mode")}
-          extra={
-            <IconButton
-              color="inherit"
-              size="small"
-              onClick={() => serviceRef.current?.open()}
-            >
-              <PrivacyTipRounded
-                fontSize="inherit"
-                style={{ cursor: "pointer", opacity: 0.75 }}
-              />
-            </IconButton>
-          }
-        >
-          <GuardState
-            value={enable_service_mode ?? false}
-            valueProps="checked"
-            onCatch={onError}
-            onFormat={onSwitchFormat}
-            onChange={(e) => onChangeData({ enable_service_mode: e })}
-            onGuard={(e) => patchVerge({ enable_service_mode: e })}
-          >
-            <Switch
-              edge="end"
-              disabled={
-                serviceStatus !== "active" && serviceStatus !== "installed"
-              }
-            />
-          </GuardState>
-        </SettingItem>
-      )}
-
       <SettingItem
         label={t("System Proxy")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
-            onClick={() => sysproxyRef.current?.open()}
-          >
-            <Settings
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
+          <>
+            <TooltipIcon
+              title={t("System Proxy Info")}
+              icon={SettingsRounded}
+              onClick={() => sysproxyRef.current?.open()}
             />
-          </IconButton>
+          </>
         }
       >
         <GuardState
@@ -144,7 +101,12 @@ const SettingSystem = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem label={t("Silent Start")}>
+      <SettingItem
+        label={t("Silent Start")}
+        extra={
+          <TooltipIcon title={t("Silent Start Info")} sx={{ opacity: "0.7" }} />
+        }
+      >
         <GuardState
           value={enable_silent_start ?? false}
           valueProps="checked"
