@@ -7,11 +7,12 @@ import {
   ListItemText,
   MenuItem,
   Select,
-  Switch,
   TextField,
+  InputAdornment,
 } from "@mui/material";
 import { useVerge } from "@/hooks/use-verge";
-import { BaseDialog, DialogRef, Notice } from "@/components/base";
+import { BaseDialog, DialogRef, Notice, Switch } from "@/components/base";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 
 export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
   const { t } = useTranslation();
@@ -21,11 +22,12 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
   const [values, setValues] = useState({
     appLogLevel: "info",
     autoCloseConnection: true,
-    enableClashFields: true,
+    autoCheckUpdate: true,
     enableBuiltinEnhanced: true,
     proxyLayoutColumn: 6,
     defaultLatencyTest: "",
     autoLogClean: 0,
+    defaultLatencyTimeout: 10000,
   });
 
   useImperativeHandle(ref, () => ({
@@ -34,11 +36,12 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
       setValues({
         appLogLevel: verge?.app_log_level ?? "info",
         autoCloseConnection: verge?.auto_close_connection ?? true,
-        enableClashFields: verge?.enable_clash_fields ?? true,
+        autoCheckUpdate: verge?.auto_check_update ?? true,
         enableBuiltinEnhanced: verge?.enable_builtin_enhanced ?? true,
         proxyLayoutColumn: verge?.proxy_layout_column || 6,
         defaultLatencyTest: verge?.default_latency_test || "",
         autoLogClean: verge?.auto_log_clean || 0,
+        defaultLatencyTimeout: verge?.default_latency_timeout || 10000,
       });
     },
     close: () => setOpen(false),
@@ -49,10 +52,11 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
       await patchVerge({
         app_log_level: values.appLogLevel,
         auto_close_connection: values.autoCloseConnection,
-        enable_clash_fields: values.enableClashFields,
+        auto_check_update: values.autoCheckUpdate,
         enable_builtin_enhanced: values.enableBuiltinEnhanced,
         proxy_layout_column: values.proxyLayoutColumn,
         default_latency_test: values.defaultLatencyTest,
+        default_latency_timeout: values.defaultLatencyTimeout,
         auto_log_clean: values.autoLogClean as any,
       });
       setOpen(false);
@@ -79,12 +83,12 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
             size="small"
             sx={{ width: 100, "> div": { py: "7.5px" } }}
             value={values.appLogLevel}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 appLogLevel: e.target.value as string,
-              }));
-            }}
+              }))
+            }
           >
             {["trace", "debug", "info", "warn", "error", "silent"].map((i) => (
               <MenuItem value={i} key={i}>
@@ -95,53 +99,69 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Auto Close Connections")} />
+          <ListItemText
+            primary={t("Auto Close Connections")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Auto Close Connections Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <Switch
             edge="end"
             checked={values.autoCloseConnection}
             onChange={(_, c) =>
               setValues((v) => ({ ...v, autoCloseConnection: c }))
             }
+            sx={{ marginLeft: "auto" }}
           />
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Enable Clash Fields Filter")} />
+          <ListItemText primary={t("Auto Check Update")} />
           <Switch
             edge="end"
-            checked={values.enableClashFields}
+            checked={values.autoCheckUpdate}
             onChange={(_, c) =>
-              setValues((v) => ({ ...v, enableClashFields: c }))
+              setValues((v) => ({ ...v, autoCheckUpdate: c }))
             }
           />
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Enable Builtin Enhanced")} />
+          <ListItemText
+            primary={t("Enable Builtin Enhanced")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Enable Builtin Enhanced Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <Switch
             edge="end"
             checked={values.enableBuiltinEnhanced}
             onChange={(_, c) =>
               setValues((v) => ({ ...v, enableBuiltinEnhanced: c }))
             }
+            sx={{ marginLeft: "auto" }}
           />
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Proxy Layout Column")} />
+          <ListItemText primary={t("Proxy Layout Columns")} />
           <Select
             size="small"
             sx={{ width: 135, "> div": { py: "7.5px" } }}
             value={values.proxyLayoutColumn}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 proxyLayoutColumn: e.target.value as number,
-              }));
-            }}
+              }))
+            }
           >
             <MenuItem value={6} key={6}>
-              Auto
+              {t("Auto Columns")}
             </MenuItem>
             {[1, 2, 3, 4, 5].map((i) => (
               <MenuItem value={i} key={i}>
@@ -157,40 +177,73 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
             size="small"
             sx={{ width: 135, "> div": { py: "7.5px" } }}
             value={values.autoLogClean}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 autoLogClean: e.target.value as number,
-              }));
-            }}
+              }))
+            }
           >
             {[
-              { key: "Never Clean", value: 0 },
-              { key: "Retain 7 Days", value: 1 },
-              { key: "Retain 30 Days", value: 2 },
-              { key: "Retain 90 Days", value: 3 },
+              { key: t("Never Clean"), value: 0 },
+              { key: t("Retain _n Days", { n: 7 }), value: 1 },
+              { key: t("Retain _n Days", { n: 30 }), value: 2 },
+              { key: t("Retain _n Days", { n: 90 }), value: 3 },
             ].map((i) => (
               <MenuItem key={i.value} value={i.value}>
-                {t(i.key)}
+                {i.key}
               </MenuItem>
             ))}
           </Select>
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Default Latency Test")} />
+          <ListItemText
+            primary={t("Default Latency Test")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Default Latency Test Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <TextField
+            autoComplete="new-password"
             size="small"
-            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck="false"
+            sx={{ width: 250, marginLeft: "auto" }}
+            value={values.defaultLatencyTest}
+            placeholder="http://cp.cloudflare.com/generate_204"
+            onChange={(e) =>
+              setValues((v) => ({ ...v, defaultLatencyTest: e.target.value }))
+            }
+          />
+        </ListItem>
+
+        <ListItem sx={{ padding: "5px 2px" }}>
+          <ListItemText primary={t("Default Latency Timeout")} />
+          <TextField
+            autoComplete="new-password"
+            size="small"
+            type="number"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck="false"
             sx={{ width: 250 }}
-            value={values.defaultLatencyTest}
-            placeholder="http://1.1.1.1"
+            value={values.defaultLatencyTimeout}
+            placeholder="10000"
             onChange={(e) =>
-              setValues((v) => ({ ...v, defaultLatencyTest: e.target.value }))
+              setValues((v) => ({
+                ...v,
+                defaultLatencyTimeout: parseInt(e.target.value),
+              }))
             }
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">{t("millis")}</InputAdornment>
+              ),
+            }}
           />
         </ListItem>
       </List>

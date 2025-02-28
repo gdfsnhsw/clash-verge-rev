@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::core::handle;
 use crate::utils::{dirs, help};
 use anyhow::Result;
 use chrono::{Local, TimeZone};
@@ -8,7 +9,9 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Logger, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use std::fs::{self, DirEntry};
+use std::path::PathBuf;
 use std::str::FromStr;
+use tauri_plugin_shell::ShellExt;
 
 /// initialize this instance's log file
 fn init_log() -> Result<()> {
@@ -41,21 +44,9 @@ fn init_log() -> Result<()> {
 
     let log_more = log_level == LevelFilter::Trace || log_level == LevelFilter::Debug;
 
-    #[cfg(feature = "verge-dev")]
-    {
-        logger_builder = logger_builder.appenders(["file", "stdout"]);
-        if log_more {
-            root_builder = root_builder.appenders(["file", "stdout"]);
-        } else {
-            root_builder = root_builder.appenders(["stdout"]);
-        }
-    }
-    #[cfg(not(feature = "verge-dev"))]
-    {
-        logger_builder = logger_builder.appenders(["file"]);
-        if log_more {
-            root_builder = root_builder.appenders(["file"]);
-        }
+    logger_builder = logger_builder.appenders(["file"]);
+    if log_more {
+        root_builder = root_builder.appenders(["file"]);
     }
 
     let (config, _) = log4rs::config::Config::builder()
@@ -79,7 +70,7 @@ pub fn delete_log() -> Result<()> {
     let auto_log_clean = {
         let verge = Config::verge();
         let verge = verge.data();
-        verge.auto_log_clean.clone().unwrap_or(0)
+        verge.auto_log_clean.unwrap_or(0)
     };
 
     let day = match auto_log_clean {
@@ -130,17 +121,22 @@ pub fn delete_log() -> Result<()> {
         Ok(())
     };
 
-    for file in fs::read_dir(&log_dir)? {
-        if let Ok(file) = file {
-            let _ = process_file(file);
-        }
+    for file in fs::read_dir(&log_dir)?.flatten() {
+        let _ = process_file(file);
     }
+
+    let service_log_dir = log_dir.join("service");
+    for file in fs::read_dir(service_log_dir)?.flatten() {
+        let _ = process_file(file);
+    }
+
     Ok(())
 }
 
 /// Initialize all the config files
 /// before tauri setup
 pub fn init_config() -> Result<()> {
+    let _ = dirs::init_portable_flag();
     let _ = init_log();
     let _ = delete_log();
 
@@ -184,18 +180,19 @@ pub fn init_config() -> Result<()> {
 /// after tauri setup
 pub fn init_resources() -> Result<()> {
     let app_dir = dirs::app_home_dir()?;
+    let test_dir = app_dir.join("test");
     let res_dir = dirs::app_resources_dir()?;
 
     if !app_dir.exists() {
         let _ = fs::create_dir_all(&app_dir);
     }
+    if !test_dir.exists() {
+        let _ = fs::create_dir_all(&test_dir);
+    }
     if !res_dir.exists() {
         let _ = fs::create_dir_all(&res_dir);
     }
 
-    #[cfg(target_os = "windows")]
-    let file_list = ["Country.mmdb", "geoip.dat", "geosite.dat"];
-    #[cfg(not(target_os = "windows"))]
     let file_list = ["Country.mmdb", "geoip.dat", "geosite.dat"];
 
     // copy the resource file
@@ -203,18 +200,23 @@ pub fn init_resources() -> Result<()> {
     for file in file_list.iter() {
         let src_path = res_dir.join(file);
         let dest_path = app_dir.join(file);
+        let test_dest_path = test_dir.join(file);
+        log::debug!(target: "app", "src_path: {src_path:?}, dest_path: {dest_path:?}");
 
-        let handle_copy = || {
-            match fs::copy(&src_path, &dest_path) {
+        let handle_copy = |dest: &PathBuf| {
+            match fs::copy(&src_path, dest) {
                 Ok(_) => log::debug!(target: "app", "resources copied '{file}'"),
                 Err(err) => {
-                    log::error!(target: "app", "failed to copy resources '{file}', {err}")
+                    log::error!(target: "app", "failed to copy resources '{file}' to '{dest:?}', {err}")
                 }
             };
         };
 
+        if src_path.exists() && !test_dest_path.exists() {
+            handle_copy(&test_dest_path);
+        }
         if src_path.exists() && !dest_path.exists() {
-            handle_copy();
+            handle_copy(&dest_path);
             continue;
         }
 
@@ -224,14 +226,14 @@ pub fn init_resources() -> Result<()> {
         match (src_modified, dest_modified) {
             (Ok(src_modified), Ok(dest_modified)) => {
                 if src_modified > dest_modified {
-                    handle_copy();
+                    handle_copy(&dest_path);
                 } else {
                     log::debug!(target: "app", "skipping resource copy '{file}'");
                 }
             }
             _ => {
                 log::debug!(target: "app", "failed to get modified '{file}'");
-                handle_copy();
+                handle_copy(&dest_path);
             }
         };
     }
@@ -239,63 +241,87 @@ pub fn init_resources() -> Result<()> {
     Ok(())
 }
 
-/// initialize service resources
-/// after tauri setup
+/// initialize url scheme
 #[cfg(target_os = "windows")]
-pub fn init_service() -> Result<()> {
-    let service_dir = dirs::service_dir()?;
-    let res_dir = dirs::app_resources_dir()?;
+pub fn init_scheme() -> Result<()> {
+    use tauri::utils::platform::current_exe;
+    use winreg::enums::*;
+    use winreg::RegKey;
 
-    if !service_dir.exists() {
-        let _ = fs::create_dir_all(&service_dir);
+    let app_exe = current_exe()?;
+    let app_exe = dunce::canonicalize(app_exe)?;
+    let app_exe = app_exe.to_string_lossy().into_owned();
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (clash, _) = hkcu.create_subkey("Software\\Classes\\Clash")?;
+    clash.set_value("", &"Clash Verge")?;
+    clash.set_value("URL Protocol", &"Clash Verge URL Scheme Protocol")?;
+    let (default_icon, _) = hkcu.create_subkey("Software\\Classes\\Clash\\DefaultIcon")?;
+    default_icon.set_value("", &app_exe)?;
+    let (command, _) = hkcu.create_subkey("Software\\Classes\\Clash\\Shell\\Open\\Command")?;
+    command.set_value("", &format!("{app_exe} \"%1\""))?;
+
+    Ok(())
+}
+#[cfg(target_os = "linux")]
+pub fn init_scheme() -> Result<()> {
+    let output = std::process::Command::new("xdg-mime")
+        .arg("default")
+        .arg("clash-verge.desktop")
+        .arg("x-scheme-handler/clash")
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "failed to set clash scheme, {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    if !res_dir.exists() {
-        let _ = fs::create_dir_all(&res_dir);
+    Ok(())
+}
+#[cfg(target_os = "macos")]
+pub fn init_scheme() -> Result<()> {
+    Ok(())
+}
+
+pub async fn startup_script() -> Result<()> {
+    let app_handle = handle::Handle::global().app_handle().unwrap();
+
+    let script_path = {
+        let verge = Config::verge();
+        let verge = verge.latest();
+        verge.startup_script.clone().unwrap_or("".to_string())
+    };
+
+    if script_path.is_empty() {
+        return Ok(());
     }
 
-    let file_list = [
-        "clash-verge-service.exe",
-        "install-service.exe",
-        "uninstall-service.exe",
-    ];
+    let shell_type = if script_path.ends_with(".sh") {
+        "bash"
+    } else if script_path.ends_with(".ps1") || script_path.ends_with(".bat") {
+        "powershell"
+    } else {
+        return Err(anyhow::anyhow!(
+            "unsupported script extension: {}",
+            script_path
+        ));
+    };
 
-    // copy the resource file
-    // if the source file is newer than the destination file, copy it over
-    for file in file_list.iter() {
-        let src_path = res_dir.join(file);
-        let dest_path = service_dir.join(file);
-
-        let handle_copy = || {
-            match fs::copy(&src_path, &dest_path) {
-                Ok(_) => log::debug!(target: "app", "resources copied '{file}'"),
-                Err(err) => {
-                    log::error!(target: "app", "failed to copy resources '{file}', {err}")
-                }
-            };
-        };
-
-        if src_path.exists() && !dest_path.exists() {
-            handle_copy();
-            continue;
-        }
-
-        let src_modified = fs::metadata(&src_path).and_then(|m| m.modified());
-        let dest_modified = fs::metadata(&dest_path).and_then(|m| m.modified());
-
-        match (src_modified, dest_modified) {
-            (Ok(src_modified), Ok(dest_modified)) => {
-                if src_modified > dest_modified {
-                    handle_copy();
-                } else {
-                    log::debug!(target: "app", "skipping resource copy '{file}'");
-                }
-            }
-            _ => {
-                log::debug!(target: "app", "failed to get modified '{file}'");
-                handle_copy();
-            }
-        };
+    let script_dir = PathBuf::from(&script_path);
+    if !script_dir.exists() {
+        return Err(anyhow::anyhow!("script not found: {}", script_path));
     }
+
+    let parent_dir = script_dir.parent();
+    let working_dir = parent_dir.unwrap_or(script_dir.as_ref());
+
+    app_handle
+        .shell()
+        .command(shell_type)
+        .current_dir(working_dir)
+        .args(&[script_path])
+        .output()
+        .await?;
 
     Ok(())
 }

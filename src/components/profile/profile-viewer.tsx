@@ -15,12 +15,11 @@ import {
   InputLabel,
   MenuItem,
   Select,
-  Switch,
   styled,
   TextField,
 } from "@mui/material";
 import { createProfile, patchProfile } from "@/services/cmds";
-import { BaseDialog, Notice } from "@/components/base";
+import { BaseDialog, Notice, Switch } from "@/components/base";
 import { version } from "@root/package.json";
 import { FileInput } from "./file-input";
 
@@ -34,7 +33,7 @@ export interface ProfileViewerRef {
 }
 
 // create or edit the profile
-// remote / local / merge / script
+// remote / local
 export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
   (props, ref) => {
     const { t } = useTranslation();
@@ -48,11 +47,10 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
     const { control, watch, register, ...formIns } = useForm<IProfileItem>({
       defaultValues: {
         type: "remote",
-        name: "Remote File",
+        name: "",
         desc: "",
         url: "",
         option: {
-          // user_agent: "",
           with_proxy: false,
           self_proxy: false,
         },
@@ -94,11 +92,14 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
           if (form.type === "remote" && !form.url) {
             throw new Error("The URL should not be null");
           }
-          if (form.type !== "remote" && form.type !== "local") {
-            delete form.option;
-          }
+
           if (form.option?.update_interval) {
             form.option.update_interval = +form.option.update_interval;
+          } else {
+            delete form.option?.update_interval;
+          }
+          if (form.option?.user_agent === "") {
+            delete form.option.user_agent;
           }
           const name = form.name || `${form.type} file`;
           const item = { ...form, name };
@@ -164,8 +165,6 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
               <Select {...field} autoFocus label={t("Type")}>
                 <MenuItem value="remote">Remote</MenuItem>
                 <MenuItem value="local">Local</MenuItem>
-                <MenuItem value="script">Script</MenuItem>
-                <MenuItem value="merge">Merge</MenuItem>
               </Select>
             </FormControl>
           )}
@@ -225,16 +224,11 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
               <TextField
                 {...text}
                 {...field}
-                onChange={(e) => {
-                  e.target.value = e.target.value
-                    ?.replace(/\D/, "")
-                    .slice(0, 10);
-                  field.onChange(e);
-                }}
+                type="number"
                 label={t("Update Interval")}
                 InputProps={{
                   endAdornment: (
-                    <InputAdornment position="end">mins</InputAdornment>
+                    <InputAdornment position="end">{t("mins")}</InputAdornment>
                   ),
                 }}
               />
@@ -243,7 +237,12 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
         )}
 
         {isLocal && openType === "new" && (
-          <FileInput onChange={(val) => (fileDataRef.current = val)} />
+          <FileInput
+            onChange={(file, val) => {
+              formIns.setValue("name", formIns.getValues("name") || file.name);
+              fileDataRef.current = val;
+            }}
+          />
         )}
 
         {isRemote && (
@@ -265,6 +264,17 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
               render={({ field }) => (
                 <StyledBox>
                   <InputLabel>{t("Use Clash Proxy")}</InputLabel>
+                  <Switch checked={field.value} {...field} color="primary" />
+                </StyledBox>
+              )}
+            />
+
+            <Controller
+              name="option.danger_accept_invalid_certs"
+              control={control}
+              render={({ field }) => (
+                <StyledBox>
+                  <InputLabel>{t("Accept Invalid Certs (Danger)")}</InputLabel>
                   <Switch checked={field.value} {...field} color="primary" />
                 </StyledBox>
               )}

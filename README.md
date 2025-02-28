@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="./src/assets/image/logo.png" alt="Clash" width="128" />
+  <img src="./src-tauri/icons/icon.png" alt="Clash" width="128" />
   <br>
   Continuation of <a href="https://github.com/zzzgydi/clash-verge">Clash Verge</a>
   <br>
@@ -9,100 +9,67 @@
 A Clash Meta GUI based on <a href="https://github.com/tauri-apps/tauri">Tauri</a>.
 </h3>
 
-## Features
+## Preview
 
-- Since the clash core has been removed. The project no longer maintains the clash core, but only the Clash Meta core.
-- Profiles management and enhancement (by yaml and Javascript). [Doc](https://github.com/clash-verge-rev/clash-verge-rev/wiki/%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97)
-- Simple UI and supports custom theme color.
-- Built-in support [Clash.Meta(mihomo)](https://github.com/MetaCubeX/mihomo) core.
-- System proxy setting and guard.
+| Dark                             | Light                             |
+| -------------------------------- | --------------------------------- |
+| ![预览](./docs/preview_dark.png) | ![预览](./docs/preview_light.png) |
 
-#### TG Group: [@clash_verge_rev](https://t.me/clash_verge_rev)
+## Install
+
+请到发布页面下载对应的安装包：[Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases)<br>
+Go to the [release page](https://github.com/clash-verge-rev/clash-verge-rev/releases) to download the corresponding installation package<br>
+Supports Windows (x64/x86), Linux (x64/arm64) and macOS 10.15+ (intel/apple).
+
+### 安装说明和常见问题，请到[文档页](https://clash-verge-rev.github.io/)查看：[Doc](https://clash-verge-rev.github.io/)
+
+---
+
+### TG 频道: [@clash_verge_rev](https://t.me/clash_verge_re)
 
 ## Promotion
 
-[狗狗加速 —— 技术流机场 Doggygo VPN](https://狗狗加速.com)
+[狗狗加速 —— 技术流机场 Doggygo VPN](https://verge.dginv.click/#/register?code=oaxsAGo6)
 
 - 高性能海外机场，免费试用，优惠套餐，解锁流媒体，全球首家支持 Hysteria 协议。
-- 使用 Clash Verge 专属邀请链接注册送 3 天，每天 1G 流量免费试用：https://verge.狗狗加速.com/#/register?code=oaxsAGo6
+- 使用 Clash Verge 专属邀请链接注册送 3 天，每天 1G 流量免费试用：[点此注册](https://verge.dginv.click/#/register?code=oaxsAGo6)
 - Clash Verge 专属 8 折优惠码: verge20 (仅有 500 份)
 - 优惠套餐每月仅需 15.8 元，160G 流量，年付 8 折
 - 海外团队，无跑路风险，高达 50% 返佣
 - 集群负载均衡设计，高速专线(兼容老客户端)，极低延迟，无视晚高峰，4K 秒开
 - 全球首家 Hysteria 协议机场，现已上线更快的 `Hysteria2` 协议(Clash Verge 客户端最佳搭配)
 - 解锁流媒体及 ChatGPT
-- 官网：https://狗狗加速.com
+- 官网：[https://狗狗加速.com](https://verge.dginv.click/#/register?code=oaxsAGo6)
 
-## Preview
+## Features
 
-![preview](./docs/preview.gif)
-
-## Install
-
-Download from [release](https://github.com/clash-verge-rev/clash-verge-rev/releases). Supports Windows (x64/x86), Linux (x64/arm64) and macOS 10.15+ (intel/apple).
-
-- [Windows x64](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/Clash.Verge_1.4.5_x64-setup.exe)
-- [Windows x86](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/Clash.Verge_1.4.5_x86-setup.exe)
-- [Windows arm64](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/Clash.Verge_1.4.5_arm64-setup.exe)
-
-- [macOS intel](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/Clash.Verge_1.4.5_x64.dmg)
-- [macOS apple](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/Clash.Verge_1.4.5_aarch64.dmg)
-
-- [Linux x64 AppImage](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/clash-verge_1.4.5_amd64.AppImage)
-- [Linux x64 deb](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/clash-verge_1.4.5_amd64.deb)
-- [Linux x86 AppImage](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/clash-verge_1.4.5_i386.AppImage)
-- [Linux x86 deb](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/clash-verge_1.4.5_i386.deb)
-- [Linux arm64 deb](https://github.com/clash-verge-rev/clash-verge-rev/releases/download/v1.4.5/clash-verge_1.4.5_arm64.deb)
-
-Or you can build it yourself. Supports Windows, Linux and macOS 10.15+
-
-Notes: If you could not start the app on Windows, please check that you have [Webview2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section) installed.
+- 基于性能强劲的 Rust 和 Tauri 2 框架
+- 内置[Clash.Meta(mihomo)](https://github.com/MetaCubeX/mihomo)内核，并支持切换 `Alpha` 版本内核。
+- 简洁美观的用户界面，支持自定义主题颜色、代理组/托盘图标以及 `CSS Injection`。
+- 配置文件管理和增强（Merge 和 Script），配置文件语法提示。
+- 系统代理和守卫、`TUN(虚拟网卡)` 模式。
+- 可视化节点和规则编辑
+- WebDav 配置备份和同步
 
 ### FAQ
 
-#### 1. **macOS** "Clash Verge" is damaged and can't be opened
+Refer to [Doc FAQ Page](https://clash-verge-rev.github.io/faq/windows.html)
 
-open the terminal and run `sudo xattr -r -d com.apple.quarantine /Applications/Clash\ Verge.app`
+### Donation
+
+[捐助Clash Verge Rev的开发](https://github.com/sponsors/clash-verge-rev)
 
 ## Development
 
-You should install Rust and Nodejs, see [here](https://tauri.app/v1/guides/getting-started/prerequisites) for more details. Then install Nodejs packages.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for more details.
+
+To run the development server, execute the following commands after all prerequisites for **Tauri** are installed:
 
 ```shell
 pnpm i
-```
-
-Then download the clash binary... Or you can download it from [clash meta release](https://github.com/MetaCubeX/Clash.Meta/releases) and rename it according to [tauri config](https://tauri.studio/docs/api/config/#tauri.bundle.externalBin).
-
-```shell
-# force update to latest version
-# pnpm run check --force
-
 pnpm run check
-```
-
-Then run
-
-```shell
 pnpm dev
-
-# run it in another way if app instance exists
-pnpm dev:diff
 ```
-
-Or you can build it
-
-```shell
-pnpm build
-```
-
-## Todos
-
-> This keng is a little big...
-
-## Disclaimer
-
-This is a learning project for Rust practice.
 
 ## Contributions
 

@@ -1,63 +1,90 @@
 import useSWR from "swr";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Virtuoso } from "react-virtuoso";
-import { Box, Paper, TextField } from "@mui/material";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { Box } from "@mui/material";
 import { getRules } from "@/services/api";
 import { BaseEmpty, BasePage } from "@/components/base";
 import RuleItem from "@/components/rule/rule-item";
+import { ProviderButton } from "@/components/rule/provider-button";
+import { BaseSearchBox } from "@/components/base/base-search-box";
+import { useTheme } from "@mui/material/styles";
+import { ScrollTopButton } from "@/components/layout/scroll-top-button";
 
 const RulesPage = () => {
   const { t } = useTranslation();
   const { data = [] } = useSWR("getRules", getRules);
-
-  const [filterText, setFilterText] = useState("");
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+  const [match, setMatch] = useState(() => (_: string) => true);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   const rules = useMemo(() => {
-    return data.filter((each) => each.payload.includes(filterText));
-  }, [data, filterText]);
+    return data.filter((item) => match(item.payload));
+  }, [data, match]);
+
+  const scrollToTop = () => {
+    virtuosoRef.current?.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  const handleScroll = (e: any) => {
+    setShowScrollTop(e.target.scrollTop > 100);
+  };
 
   return (
-    <BasePage title={t("Rules")} contentStyle={{ height: "100%" }}>
-      <Box sx={{ boxSizing: "border-box", boxShadow: 0, height: "100%" }}>
-        <Box
-          sx={{
-            pt: 1,
-            mb: 0.5,
-            mx: "12px",
-            height: "36px",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <TextField
-            hiddenLabel
-            fullWidth
-            size="small"
-            autoComplete="off"
-            variant="outlined"
-            spellCheck="false"
-            placeholder={t("Filter conditions")}
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            sx={{ input: { py: 0.65, px: 1.25 } }}
-          />
+    <BasePage
+      full
+      title={t("Rules")}
+      contentStyle={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "auto",
+      }}
+      header={
+        <Box display="flex" alignItems="center" gap={1}>
+          <ProviderButton />
         </Box>
-
-        <Box height="calc(100% - 50px)">
-          {rules.length > 0 ? (
-            <Virtuoso
-              data={rules}
-              itemContent={(index, item) => (
-                <RuleItem index={index + 1} value={item} />
-              )}
-              followOutput={"smooth"}
-            />
-          ) : (
-            <BaseEmpty text="No Rules" />
-          )}
-        </Box>
+      }
+    >
+      <Box
+        sx={{
+          pt: 1,
+          mb: 0.5,
+          mx: "10px",
+          height: "36px",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <BaseSearchBox onSearch={(match) => setMatch(() => match)} />
       </Box>
+
+      {rules.length > 0 ? (
+        <>
+          <Virtuoso
+            ref={virtuosoRef}
+            data={rules}
+            style={{
+              flex: 1,
+            }}
+            itemContent={(index, item) => (
+              <RuleItem index={index + 1} value={item} />
+            )}
+            followOutput={"smooth"}
+            scrollerRef={(ref) => {
+              if (ref) ref.addEventListener("scroll", handleScroll);
+            }}
+          />
+          <ScrollTopButton onClick={scrollToTop} show={showScrollTop} />
+        </>
+      ) : (
+        <BaseEmpty />
+      )}
     </BasePage>
   );
 };

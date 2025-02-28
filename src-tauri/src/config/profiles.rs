@@ -1,4 +1,4 @@
-use super::prfitem::PrfItem;
+use super::{prfitem::PrfItem, PrfOption};
 use crate::utils::{dirs, help};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -10,12 +10,6 @@ use std::{fs, io::Write};
 pub struct IProfiles {
     /// same as PrfConfig.current
     pub current: Option<String>,
-
-    /// same as PrfConfig.chain
-    pub chain: Option<Vec<String>>,
-
-    /// record valid fields for clash
-    pub valid: Option<Vec<String>>,
 
     /// profile list
     pub items: Option<Vec<PrfItem>>,
@@ -37,13 +31,13 @@ impl IProfiles {
                     profiles.items = Some(vec![]);
                 }
                 // compatible with the old old old version
-                profiles.items.as_mut().map(|items| {
+                if let Some(items) = profiles.items.as_mut() {
                     for item in items.iter_mut() {
                         if item.uid.is_none() {
                             item.uid = Some(help::get_uid("d"));
                         }
                     }
-                });
+                }
                 profiles
             }
             Err(err) => {
@@ -55,12 +49,6 @@ impl IProfiles {
 
     pub fn template() -> Self {
         Self {
-            valid: Some(vec![
-                "dns".into(),
-                "sub-rules".into(),
-                "unified-delay".into(),
-                "tcp-concurrent".into(),
-            ]),
             items: Some(vec![]),
             ..Self::default()
         }
@@ -83,18 +71,9 @@ impl IProfiles {
         if let Some(current) = patch.current {
             let items = self.items.as_ref().unwrap();
             let some_uid = Some(current);
-
             if items.iter().any(|e| e.uid == some_uid) {
                 self.current = some_uid;
             }
-        }
-
-        if let Some(chain) = patch.chain {
-            self.chain = Some(chain);
-        }
-
-        if let Some(valid) = patch.valid {
-            self.valid = Some(valid);
         }
 
         Ok(())
@@ -131,6 +110,7 @@ impl IProfiles {
         if item.uid.is_none() {
             bail!("the uid should not be null");
         }
+        let uid = item.uid.clone();
 
         // save the file data
         // move the field value after save
@@ -148,21 +128,30 @@ impl IProfiles {
                 .with_context(|| format!("failed to write to file \"{}\"", file))?;
         }
 
+        if self.current.is_none()
+            && (item.itype == Some("remote".to_string()) || item.itype == Some("local".to_string()))
+        {
+            self.current = uid;
+        }
+
         if self.items.is_none() {
             self.items = Some(vec![]);
         }
 
-        self.items.as_mut().map(|items| items.push(item));
+        if let Some(items) = self.items.as_mut() {
+            items.push(item)
+        }
+
         self.save_file()
     }
 
     /// reorder items
     pub fn reorder(&mut self, active_id: String, over_id: String) -> Result<()> {
-        let mut items = self.items.take().unwrap_or(vec![]);
+        let mut items = self.items.take().unwrap_or_default();
         let mut old_index = None;
         let mut new_index = None;
 
-        for i in 0..items.len() {
+        for (i, _) in items.iter().enumerate() {
             if items[i].uid == Some(active_id.clone()) {
                 old_index = Some(i);
             }
@@ -182,7 +171,7 @@ impl IProfiles {
 
     /// update the item value
     pub fn patch_item(&mut self, uid: String, item: PrfItem) -> Result<()> {
-        let mut items = self.items.take().unwrap_or(vec![]);
+        let mut items = self.items.take().unwrap_or_default();
 
         for each in items.iter_mut() {
             if each.uid == Some(uid.clone()) {
@@ -222,7 +211,8 @@ impl IProfiles {
                 if each.uid == some_uid {
                     each.extra = item.extra;
                     each.updated = item.updated;
-
+                    each.home = item.home;
+                    each.option = PrfOption::merge(each.option.clone(), item.option);
                     // save the file data
                     // move the field value after save
                     if let Some(file_data) = item.file_data.take() {
@@ -254,35 +244,133 @@ impl IProfiles {
     pub fn delete_item(&mut self, uid: String) -> Result<bool> {
         let current = self.current.as_ref().unwrap_or(&uid);
         let current = current.clone();
-
-        let mut items = self.items.take().unwrap_or(vec![]);
+        let item = self.get_item(&uid)?;
+        let merge_uid = item.option.as_ref().and_then(|e| e.merge.clone());
+        let script_uid = item.option.as_ref().and_then(|e| e.script.clone());
+        let rules_uid = item.option.as_ref().and_then(|e| e.rules.clone());
+        let proxies_uid = item.option.as_ref().and_then(|e| e.proxies.clone());
+        let groups_uid = item.option.as_ref().and_then(|e| e.groups.clone());
+        let mut items = self.items.take().unwrap_or_default();
         let mut index = None;
+        let mut merge_index = None;
+        let mut script_index = None;
+        let mut rules_index = None;
+        let mut proxies_index = None;
+        let mut groups_index = None;
 
         // get the index
-        for i in 0..items.len() {
+        for (i, _) in items.iter().enumerate() {
             if items[i].uid == Some(uid.clone()) {
                 index = Some(i);
                 break;
             }
         }
-
         if let Some(index) = index {
-            items.remove(index).file.map(|file| {
+            if let Some(file) = items.remove(index).file {
                 let _ = dirs::app_profiles_dir().map(|path| {
                     let path = path.join(file);
                     if path.exists() {
                         let _ = fs::remove_file(path);
                     }
                 });
-            });
+            }
         }
-
+        // get the merge index
+        for (i, _) in items.iter().enumerate() {
+            if items[i].uid == merge_uid {
+                merge_index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = merge_index {
+            if let Some(file) = items.remove(index).file {
+                let _ = dirs::app_profiles_dir().map(|path| {
+                    let path = path.join(file);
+                    if path.exists() {
+                        let _ = fs::remove_file(path);
+                    }
+                });
+            }
+        }
+        // get the script index
+        for (i, _) in items.iter().enumerate() {
+            if items[i].uid == script_uid {
+                script_index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = script_index {
+            if let Some(file) = items.remove(index).file {
+                let _ = dirs::app_profiles_dir().map(|path| {
+                    let path = path.join(file);
+                    if path.exists() {
+                        let _ = fs::remove_file(path);
+                    }
+                });
+            }
+        }
+        // get the rules index
+        for (i, _) in items.iter().enumerate() {
+            if items[i].uid == rules_uid {
+                rules_index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = rules_index {
+            if let Some(file) = items.remove(index).file {
+                let _ = dirs::app_profiles_dir().map(|path| {
+                    let path = path.join(file);
+                    if path.exists() {
+                        let _ = fs::remove_file(path);
+                    }
+                });
+            }
+        }
+        // get the proxies index
+        for (i, _) in items.iter().enumerate() {
+            if items[i].uid == proxies_uid {
+                proxies_index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = proxies_index {
+            if let Some(file) = items.remove(index).file {
+                let _ = dirs::app_profiles_dir().map(|path| {
+                    let path = path.join(file);
+                    if path.exists() {
+                        let _ = fs::remove_file(path);
+                    }
+                });
+            }
+        }
+        // get the groups index
+        for (i, _) in items.iter().enumerate() {
+            if items[i].uid == groups_uid {
+                groups_index = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = groups_index {
+            if let Some(file) = items.remove(index).file {
+                let _ = dirs::app_profiles_dir().map(|path| {
+                    let path = path.join(file);
+                    if path.exists() {
+                        let _ = fs::remove_file(path);
+                    }
+                });
+            }
+        }
         // delete the original uid
         if current == uid {
-            self.current = match items.len() > 0 {
-                true => items[0].uid.clone(),
-                false => None,
-            };
+            self.current = None;
+            for item in items.iter() {
+                if item.itype == Some("remote".to_string())
+                    || item.itype == Some("local".to_string())
+                {
+                    self.current = item.uid.clone();
+                    break;
+                }
+            }
         }
 
         self.items = Some(items);
@@ -299,11 +387,100 @@ impl IProfiles {
                         Some(file) => dirs::app_profiles_dir()?.join(file),
                         None => bail!("failed to get the file field"),
                     };
-                    return Ok(help::read_merge_mapping(&file_path)?);
+                    return help::read_mapping(&file_path);
                 }
                 bail!("failed to find the current profile \"uid:{current}\"");
             }
             _ => Ok(Mapping::new()),
+        }
+    }
+
+    /// 获取current指向的订阅的merge
+    pub fn current_merge(&self) -> Option<String> {
+        match (self.current.as_ref(), self.items.as_ref()) {
+            (Some(current), Some(items)) => {
+                if let Some(item) = items.iter().find(|e| e.uid.as_ref() == Some(current)) {
+                    let merge = item.option.as_ref().and_then(|e| e.merge.clone());
+                    return merge;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 获取current指向的订阅的script
+    pub fn current_script(&self) -> Option<String> {
+        match (self.current.as_ref(), self.items.as_ref()) {
+            (Some(current), Some(items)) => {
+                if let Some(item) = items.iter().find(|e| e.uid.as_ref() == Some(current)) {
+                    let script = item.option.as_ref().and_then(|e| e.script.clone());
+                    return script;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 获取current指向的订阅的rules
+    pub fn current_rules(&self) -> Option<String> {
+        match (self.current.as_ref(), self.items.as_ref()) {
+            (Some(current), Some(items)) => {
+                if let Some(item) = items.iter().find(|e| e.uid.as_ref() == Some(current)) {
+                    let rules = item.option.as_ref().and_then(|e| e.rules.clone());
+                    return rules;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 获取current指向的订阅的proxies
+    pub fn current_proxies(&self) -> Option<String> {
+        match (self.current.as_ref(), self.items.as_ref()) {
+            (Some(current), Some(items)) => {
+                if let Some(item) = items.iter().find(|e| e.uid.as_ref() == Some(current)) {
+                    let proxies = item.option.as_ref().and_then(|e| e.proxies.clone());
+                    return proxies;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 获取current指向的订阅的groups
+    pub fn current_groups(&self) -> Option<String> {
+        match (self.current.as_ref(), self.items.as_ref()) {
+            (Some(current), Some(items)) => {
+                if let Some(item) = items.iter().find(|e| e.uid.as_ref() == Some(current)) {
+                    let groups = item.option.as_ref().and_then(|e| e.groups.clone());
+                    return groups;
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 判断profile是否是current指向的
+    pub fn is_current_profile_index(&self, index: String) -> bool {
+        self.current == Some(index)
+    }
+
+    /// 获取所有的profiles(uid，名称)
+    pub fn all_profile_uid_and_name(&self) -> Option<Vec<(String, String)>> {
+        match self.items.as_ref() {
+            Some(items) => Some(items.iter().filter_map(|e| {
+                if let (Some(uid), Some(name)) = (e.uid.clone(), e.name.clone()) {
+                    Some((uid, name))
+                } else {
+                    None
+                }
+            }).collect()),
+            None => None,
         }
     }
 }
